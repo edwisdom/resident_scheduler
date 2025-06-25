@@ -12,6 +12,23 @@ class DayOfWeek(Enum):
     SATURDAY = "S"
     SUNDAY = "U"
 
+    @classmethod
+    def from_str(cls, day_str: str) -> "DayOfWeek":
+        """Convert a full day name (like 'Monday') to the enum member"""
+        day_name = day_str.upper()
+        for day in cls:
+            if day.name == day_name:
+                return day
+        raise ValueError(f"No DayOfWeek found for '{day_str}'")
+
+    def to_full_str(self) -> str:
+        return self.name.upper()
+
+    @classmethod
+    def values(cls) -> set[str]:
+        """Return all enum values as a set of strings"""
+        return {day.value for day in cls}
+
 
 class PGYLevel(Enum):
     PGY1 = 1

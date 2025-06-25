@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, TypeAlias
 
-from base.objects import DayOfWeek, Hospital, PGYLevel, Team
+from src.base.objects import DayOfWeek, Hospital, PGYLevel, Team
 
 
 def convert_old_to_new_code(old_code: str) -> str:
@@ -110,7 +110,7 @@ class Shift:
         return get_duration
 
     @classmethod
-    def from_code(code: str) -> "Shift":
+    def from_code(cls, code: str) -> "Shift":
         components = code.split("-")
         num_expected = 5
 
@@ -119,10 +119,17 @@ class Shift:
                 f"Broke code into {components}, expected it to have {num_expected} components"
             )
 
-        mandatory, hospital, team, start_time, day_of_week = components
-        return Shift(
+        mandatory, hospital, team, start_time_str, day_of_week = components
+
+        # Parse start time as datetime (using a default date)
+        hour = int(start_time_str)
+        start_time = datetime(2024, 1, 1, hour, 0)  # Default date, only time matters
+
+        return cls(
             is_mandatory=(mandatory == "m"),
             hospital=Hospital(name=hospital),
             team=Team(team),
+            start_time=start_time,
             day=DayOfWeek(day_of_week),
+            code=code,
         )
