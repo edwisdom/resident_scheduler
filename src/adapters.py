@@ -1,8 +1,9 @@
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from src.base.objects import DayOfWeek
+from src.base.objects import DayOfWeek, PGYLevel, Resident, ServiceType
 from src.base.shift import Shift, convert_old_to_new_code
 
 
@@ -47,3 +48,52 @@ def read_shifts(filename: Path) -> list[Shift]:
                 continue
 
     return shifts
+
+
+def read_residents(filename: Path) -> list[Resident]:
+    df = pd.read_csv(filename)
+
+    residents = []
+
+    for _, row in df.iterrows():
+        # Extract basic info
+        name = str(row["Resident"]).strip()
+        pgy_int = int(row["PGY"])
+        service_str = str(row["Service"]).strip()
+        hours_goal = int(row["Hours/Block Goal"])
+
+        # Convert PGY to enum
+        pgy_level = PGYLevel(pgy_int)
+
+        # Convert service to enum
+        service_type = ServiceType(service_str)
+
+        # Parse requests (dates)
+        requests_off = []
+        requests_raw = row.get("Requests", "")
+
+        if pd.notna(requests_raw) and str(requests_raw).strip():
+            # Split by comma and parse each date
+            date_strings = [d.strip() for d in str(requests_raw).split(",")]
+            for date_str in date_strings:
+                if date_str:  # Skip empty strings
+                    try:
+                        parsed_date = datetime.strptime(date_str, "%m/%d/%Y").date()
+                        requests_off.append(parsed_date)
+                    except ValueError as e:
+                        print(
+                            f"Warning: Could not parse date '{date_str}' for resident {name}: {e}"
+                        )
+
+        # Create resident object
+        resident = Resident(
+            name=name,
+            pgy_level=pgy_level,
+            service_type=service_type,
+            hours_goal=hours_goal,
+            requests_off=requests_off,
+        )
+
+        residents.append(resident)
+
+    return residents

@@ -1,8 +1,8 @@
 # Tasks To-Do
 
-- Read in the actual set of shifts
-- Read in the set of residents
-- Comment out AI slop
+- ~~Read in the actual set of shifts~~
+- ~~Read in the set of residents~~
+- ~~Comment out AI slop~~
 - Commit the whole thing to Git
 - Figure out the right format for the constraints for the CP model
 - Fix Danny's requests for time off -- they're not in the same week
