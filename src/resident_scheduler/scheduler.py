@@ -78,7 +78,7 @@ class ScheduleModel:
         eligible_residents = [
             r
             for r in self.residents
-            if r.service_type in [ServiceType.ED, ServiceType.PEDS]
+            if r.service_type not in [ServiceType.OFF_SERVICE, ServiceType.VACATION]
         ]
 
         for day in self.days:
