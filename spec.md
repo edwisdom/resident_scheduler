@@ -39,7 +39,6 @@ Shifts that are in parentheses are optional shifts, but should be scheduled for 
 | | LRn | LRn | LRn | LRn | LRn | LRn | LRn |
 | | LG7 | LG7 | | LG7 | LG7 | LG7 | LG7 |
 | | LG1 | LG1 | LG1 | LG1 | LG1 | LG2 | LG2 |
-| | | | | | | LS4 | LS4 |
 | | LG4 | LG4 | LG4 | LG4 | LG4 | - | - |
 | | LGn | LGn | LGn | LGn | LGn | LGn | LGn |
 | | LId | LId | LIdw | LId | LId | LId | LId |
@@ -56,7 +55,6 @@ Shifts that are in parentheses are optional shifts, but should be scheduled for 
 | | WRn | WRn | WRn | WRn | WRn | WRn | WRn |
 | | WG7 | WG7 | | WG7 | WG7 | WG7 | WG7 |
 | | WG1 | WG1 | WG1 | WG1 | WG1 | WG1 | WG1 |
-| | | | | | | WS4 | WS4 |
 | | WG4 | WG4 | WG4 | WG4 | WG4 | - | - |
 | | LGn | LGn | LGn | LGn | LGn | LGn | LGn |
 | | WId | WId | WIdw | WId | WId | WId | WId |
