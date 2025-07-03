@@ -22,7 +22,6 @@ class ConstraintSpec:
     name: str
     constraint_func: Callable[[], List[cp_model.Constraint]]
     constraint_type: ConstraintType = ConstraintType.HARD
-    enabled: bool = True
 
 
 @dataclass
@@ -598,9 +597,8 @@ class ScheduleModel:
 
         applied_constraints = {}
         for spec in constraint_specs:
-            if spec.enabled:
-                constraints = spec.constraint_func()
-                applied_constraints[spec.name] = constraints
+            constraints = spec.constraint_func()
+            applied_constraints[spec.name] = constraints
 
         return applied_constraints
 
@@ -614,7 +612,7 @@ class ScheduleModel:
             ]
 
         # Apply constraints
-        applied_constraints = self.apply_constraints(constraint_specs)
+        self.apply_constraints(constraint_specs)
 
         # Set objective if we have soft constraints
         if self.objective_terms:
