@@ -6,8 +6,15 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
 
-from base.objects import Hospital, HospitalSystem, PGYLevel, Resident, ServiceType, Team
-from base.shift import Shift, ShiftTemplate, generate_shifts_for_date_range
+from src.base.objects import (
+    Hospital,
+    HospitalSystem,
+    PGYLevel,
+    Resident,
+    ServiceType,
+    Team,
+)
+from src.base.shift import Shift, ShiftTemplate, generate_shifts_for_date_range
 
 
 class ConstraintType(Enum):
@@ -106,7 +113,7 @@ class ScheduleModel:
         """Get all available constraint specifications"""
         return [
             ConstraintSpec("shift_assignment", self._shift_assignment_constraints),
-            # ConstraintSpec("resident_daily", self._resident_daily_constraints),
+            ConstraintSpec("resident_daily", self._resident_daily_constraints),
             # ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
             # ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
             # ConstraintSpec("team_assignment", self._team_constraints),
@@ -152,16 +159,24 @@ class ScheduleModel:
         for day in self.days:
             for resident in self.residents:
                 if resident.service_type in [ServiceType.ED, ServiceType.PEDS]:
-                    constraints.append(
-                        self.model.Add(
-                            sum(
-                                self.assignments[(day, shift, resident)]
-                                for shift in self.shifts_by_day[day]
-                                if (day, shift, resident) in self.assignments
-                            )
-                            <= 1
-                        )
+                    # Count how many assignment variables this resident has for this day
+                    assignment_count = sum(
+                        1
+                        for shift in self.shifts_by_day[day]
+                        if (day, shift, resident) in self.assignments
                     )
+
+                    if assignment_count > 0:
+                        constraints.append(
+                            self.model.Add(
+                                sum(
+                                    self.assignments[(day, shift, resident)]
+                                    for shift in self.shifts_by_day[day]
+                                    if (day, shift, resident) in self.assignments
+                                )
+                                <= 1
+                            )
+                        )
         return constraints
 
     def _continuous_hours_constraints(self) -> List[cp_model.Constraint]:

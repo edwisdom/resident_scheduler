@@ -52,8 +52,10 @@ def test_scheduler():
 
         # Get constraint specs and show what's enabled
         constraint_specs = model.get_constraint_specs()
-        enabled_specs = [spec for spec in constraint_specs if spec.enabled]
-        print(f"Enabled constraints: {[spec.name for spec in enabled_specs]}")
+        print(f"Enabled constraints: {[spec.name for spec in constraint_specs]}")
+
+        # Apply constraints
+        applied_constraints = model.apply_constraints(constraint_specs)
 
         # Solve with only the shift assignment constraint
         schedule = model.solve()
