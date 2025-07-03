@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.adapters import read_residents
+from formats.readers import read_residents
 from src.base.objects import PGYLevel, ServiceType
 
 

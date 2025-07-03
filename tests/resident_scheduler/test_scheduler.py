@@ -7,8 +7,8 @@ from pathlib import Path
 # Add src to path so we can import modules
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from adapters import read_residents, read_shifts
 from base.objects import Hospital, HospitalSystem
+from formats.readers import read_residents, read_shifts
 from resident_scheduler.scheduler import ScheduleModel
 
 

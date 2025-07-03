@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.adapters import read_shifts
+from formats.readers import read_shifts
 from src.base.objects import DayOfWeek, Team
 
 
