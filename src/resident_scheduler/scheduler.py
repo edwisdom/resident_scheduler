@@ -1,12 +1,28 @@
 import random
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Tuple
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
 
 from base.objects import Hospital, HospitalSystem, PGYLevel, Resident, ServiceType, Team
 from base.shift import Shift
+
+
+class ConstraintType(Enum):
+    HARD = "hard"
+    SOFT = "soft"
+
+
+@dataclass
+class ConstraintSpec:
+    """Specification for a constraint to be added to the model"""
+
+    name: str
+    constraint_func: Callable[[], List[cp_model.Constraint]]
+    constraint_type: ConstraintType = ConstraintType.HARD
+    enabled: bool = True
 
 
 @dataclass
@@ -27,14 +43,16 @@ class ScheduleModel:
     # CP-SAT model components
     model: cp_model.CpModel = field(init=False)
     solver: cp_model.CpSolver = field(init=False)
-    assignments: Dict[Tuple[datetime, Shift, Resident], cp_model.BoolVar] = field(
+    assignments: Dict[Tuple[datetime, Shift, Resident], cp_model.IntVar] = field(
         init=False
     )
+    objective_terms: List[cp_model.LinearExpr] = field(init=False)
 
     def __post_init__(self):
-        # Initialize the CP-SAT model
+        """Initialize the model components"""
         self.model = cp_model.CpModel()
         self.solver = cp_model.CpSolver()
+        self.objective_terms = []
 
         # Create lookup maps
         self._create_lookup_maps()
@@ -74,7 +92,7 @@ class ScheduleModel:
         """Create binary variables for each possible assignment"""
         self.assignments = {}
 
-        # Only create variables for eligible residents (not off-service or on vacation)
+        # Only create variables for eligible residents
         eligible_residents = [
             r
             for r in self.residents
@@ -84,68 +102,78 @@ class ScheduleModel:
         for day in self.days:
             for shift in self.shifts_by_day[day]:
                 for resident in eligible_residents:
-                    # Create a unique key for this assignment
                     key = (day, shift, resident)
-                    # Create a binary variable (0 or 1) for this assignment
                     self.assignments[key] = self.model.NewBoolVar(
                         f"assign_{day.strftime('%Y-%m-%d')}_{shift.code}_{resident.name}"
                     )
 
-    def add_hard_constraints(self):
-        """Add all hard constraints to the model"""
-        self._add_shift_assignment_constraints()
-        self._add_resident_daily_constraints()
-        self._add_duty_hour_constraints()
-        self._add_team_constraints()
-        self._add_rest_period_constraints()
-        self._add_day_off_constraints()
+    def get_constraint_specs(self) -> List[ConstraintSpec]:
+        """Get all available constraint specifications"""
+        return [
+            ConstraintSpec("shift_assignment", self._shift_assignment_constraints),
+            # ConstraintSpec("resident_daily", self._resident_daily_constraints),
+            # ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
+            # ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
+            # ConstraintSpec("team_assignment", self._team_constraints),
+            # ConstraintSpec("rest_periods", self._rest_period_constraints),
+            # ConstraintSpec("day_off", self._day_off_constraints),
+            # ConstraintSpec(
+            #     "hour_goals", self._hour_goal_constraints, ConstraintType.SOFT
+            # ),
+            # ConstraintSpec(
+            #     "alternating_hospitals",
+            #     self._alternating_hospital_constraints,
+            #     ConstraintType.SOFT,
+            # ),
+            # ConstraintSpec("time_off", self._time_off_constraints, ConstraintType.SOFT),
+            # ConstraintSpec(
+            #     "circadian_rhythm",
+            #     self._circadian_rhythm_constraints,
+            #     ConstraintType.SOFT,
+            # ),
+        ]
 
-    def _add_shift_assignment_constraints(self):
+    def _shift_assignment_constraints(self) -> List[cp_model.Constraint]:
         """Each mandatory shift must be assigned to exactly one resident"""
+        constraints = []
         for day in self.days:
             for shift in self.shifts_by_day[day]:
                 if shift.is_mandatory:
-                    # Sum of all assignments for this shift must equal 1
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for resident in self.residents
-                            if (day, shift, resident) in self.assignments
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for resident in self.residents
+                                if (day, shift, resident) in self.assignments
+                            )
+                            == 1
                         )
-                        == 1
                     )
+        return constraints
 
-    def _add_resident_daily_constraints(self):
+    def _resident_daily_constraints(self) -> List[cp_model.Constraint]:
         """Each resident can only work one shift per day"""
+        constraints = []
         for day in self.days:
             for resident in self.residents:
                 if resident.service_type in [ServiceType.ED, ServiceType.PEDS]:
-                    # Sum of all assignments for this resident on this day must be <= 1
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for shift in self.shifts_by_day[day]
-                            if (day, shift, resident) in self.assignments
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for shift in self.shifts_by_day[day]
+                                if (day, shift, resident) in self.assignments
+                            )
+                            <= 1
                         )
-                        <= 1
                     )
+        return constraints
 
-    def _add_duty_hour_constraints(self):
-        """Enforce duty hour constraints"""
-        # 1. No more than 12 continuous scheduled hours
-        self._add_continuous_hours_constraint()
-
-        # 2. No more than 60 scheduled hours per week
-        self._add_weekly_hours_constraint()
-
-    def _add_continuous_hours_constraint(self):
+    def _continuous_hours_constraints(self) -> List[cp_model.Constraint]:
         """No resident can work more than 12 continuous hours"""
-        # This is complex to model directly, so we'll use a simplified approach
-        # For each day, ensure that if a resident works a shift, they don't work
-        # another shift that would exceed 12 hours of continuous work
-
-        # Group shifts by start time for each day
+        constraints = []
         for day in self.days:
+            # Group shifts by start time
             shifts_by_start_time = {}
             for shift in self.shifts_by_day[day]:
                 start_hour = shift.start_time.hour
@@ -160,26 +188,30 @@ class ScheduleModel:
 
                 # For each possible shift start time
                 for start_hour, shifts in shifts_by_start_time.items():
-                    # Find all shifts that would overlap with this start time
+                    # Find overlapping shifts within 12 hours
                     overlapping_shifts = []
                     for other_start_hour, other_shifts in shifts_by_start_time.items():
-                        # If the other shift starts within 12 hours of this shift
                         if (other_start_hour - start_hour) % 24 < 12:
                             overlapping_shifts.extend(other_shifts)
 
-                    # If there are overlapping shifts, ensure the resident doesn't work more than one
+                    # Ensure resident doesn't work more than one overlapping shift
                     if len(overlapping_shifts) > 1:
-                        self.model.Add(
-                            sum(
-                                self.assignments[(day, shift, resident)]
-                                for shift in overlapping_shifts
-                                if (day, shift, resident) in self.assignments
+                        constraints.append(
+                            self.model.Add(
+                                sum(
+                                    self.assignments[(day, shift, resident)]
+                                    for shift in overlapping_shifts
+                                    if (day, shift, resident) in self.assignments
+                                )
+                                <= 1
                             )
-                            <= 1
                         )
+        return constraints
 
-    def _add_weekly_hours_constraint(self):
+    def _weekly_hours_constraints(self) -> List[cp_model.Constraint]:
         """No resident can work more than 60 hours per week"""
+        constraints = []
+
         # Group days by week
         weeks = {}
         for day in self.days:
@@ -199,80 +231,88 @@ class ScheduleModel:
                 for day in week_days:
                     for shift in self.shifts_by_day[day]:
                         if (day, shift, resident) in self.assignments:
-                            # Get shift duration for this resident's PGY level
                             duration = shift.duration(resident.pgy_level)
-                            # Add to total hours if assigned
                             total_hours += (
                                 self.assignments[(day, shift, resident)] * duration
                             )
 
                 # Ensure total hours doesn't exceed 60
-                self.model.Add(total_hours <= 60)
+                if total_hours > 0:
+                    constraints.append(self.model.Add(total_hours <= 60))
 
-    def _add_team_constraints(self):
+        return constraints
+
+    def _team_constraints(self) -> List[cp_model.Constraint]:
         """Enforce team-specific constraints"""
+        constraints = []
+
         # Red team (R) must be staffed by PGY-3s
         for day in self.days:
-            for shift in self.shifts_by_team[Team.RED]:
-                if (
-                    day,
-                    shift,
-                    None,
-                ) in self.assignments:  # Check if this shift exists for this day
-                    # Sum of assignments for PGY-3 residents must equal 1
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for resident in self.residents_by_pgy[PGYLevel.PGY3]
-                            if (day, shift, resident) in self.assignments
+            for shift in self.shifts_by_team.get(Team.RED, []):
+                if day in self.shifts_by_day:
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for resident in self.residents_by_pgy[PGYLevel.PGY3]
+                                if (day, shift, resident) in self.assignments
+                            )
+                            == 1
                         )
-                        == 1
                     )
 
-        # Green team (G) must be staffed by PGY-2s
+        # Similar constraints for other teams
         for day in self.days:
-            for shift in self.shifts_by_team[Team.GREEN]:
-                if (day, shift, None) in self.assignments:
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for resident in self.residents_by_pgy[PGYLevel.PGY2]
-                            if (day, shift, resident) in self.assignments
+            # Green team (G) must be staffed by PGY-2s
+            for shift in self.shifts_by_team.get(Team.GREEN, []):
+                if day in self.shifts_by_day:
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for resident in self.residents_by_pgy[PGYLevel.PGY2]
+                                if (day, shift, resident) in self.assignments
+                            )
+                            == 1
                         )
-                        == 1
                     )
 
-        # Intern team (I) must be staffed by PGY-1s
-        for day in self.days:
-            for shift in self.shifts_by_team[Team.INTERN]:
-                if (day, shift, None) in self.assignments:
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for resident in self.residents_by_pgy[PGYLevel.PGY1]
-                            if (day, shift, resident) in self.assignments
+            # Intern team (I) must be staffed by PGY-1s
+            for shift in self.shifts_by_team.get(Team.INTERN, []):
+                if day in self.shifts_by_day:
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for resident in self.residents_by_pgy[PGYLevel.PGY1]
+                                if (day, shift, resident) in self.assignments
+                            )
+                            == 1
                         )
-                        == 1
                     )
 
-        # Blue team (B) must have at least one PGY-1
-        for day in self.days:
-            for shift in self.shifts_by_team[Team.BLUE]:
-                if (day, shift, None) in self.assignments:
-                    self.model.Add(
-                        sum(
-                            self.assignments[(day, shift, resident)]
-                            for resident in self.residents_by_pgy[PGYLevel.PGY1]
-                            if (day, shift, resident) in self.assignments
+            # Blue team (B) must have at least one PGY-1
+            for shift in self.shifts_by_team.get(Team.BLUE, []):
+                if day in self.shifts_by_day:
+                    constraints.append(
+                        self.model.Add(
+                            sum(
+                                self.assignments[(day, shift, resident)]
+                                for resident in self.residents_by_pgy[PGYLevel.PGY1]
+                                if (day, shift, resident) in self.assignments
+                            )
+                            >= 1
                         )
-                        >= 1
                     )
 
-    def _add_rest_period_constraints(self):
+        return constraints
+
+    def _rest_period_constraints(self) -> List[cp_model.Constraint]:
         """Ensure residents have equivalent rest periods between shifts"""
-        # For each resident and each day
+        constraints = []
+
         for day_idx, day in enumerate(self.days):
-            if day_idx == 0:  # Skip first day
+            if day_idx == 0:
                 continue
 
             prev_day = self.days[day_idx - 1]
@@ -286,7 +326,6 @@ class ScheduleModel:
                     if (day, shift, resident) not in self.assignments:
                         continue
 
-                    # Get shift duration
                     duration = shift.duration(resident.pgy_level)
 
                     # For each shift on the previous day
@@ -294,23 +333,25 @@ class ScheduleModel:
                         if (prev_day, prev_shift, resident) not in self.assignments:
                             continue
 
-                        # Get previous shift duration
                         prev_duration = prev_shift.duration(resident.pgy_level)
-
-                        # Calculate rest period
                         rest_period = 24 - prev_duration
 
-                        # If rest period is less than the current shift duration, add constraint
+                        # If rest period is insufficient, add constraint
                         if rest_period < duration:
-                            # Resident cannot work both shifts
-                            self.model.Add(
-                                self.assignments[(prev_day, prev_shift, resident)]
-                                + self.assignments[(day, shift, resident)]
-                                <= 1
+                            constraints.append(
+                                self.model.Add(
+                                    self.assignments[(prev_day, prev_shift, resident)]
+                                    + self.assignments[(day, shift, resident)]
+                                    <= 1
+                                )
                             )
 
-    def _add_day_off_constraints(self):
+        return constraints
+
+    def _day_off_constraints(self) -> List[cp_model.Constraint]:
         """Ensure residents have at least one day off per week"""
+        constraints = []
+
         # Group days by week
         weeks = {}
         for day in self.days:
@@ -333,22 +374,19 @@ class ScheduleModel:
                     if (day, shift, resident) in self.assignments
                 )
 
-                # Number of days in the week
+                # Ensure at least one day off
                 days_in_week = len(week_days)
+                if week_assignments > 0:
+                    constraints.append(
+                        self.model.Add(week_assignments <= days_in_week - 1)
+                    )
 
-                # Ensure at least one day off (assignments <= days_in_week - 1)
-                self.model.Add(week_assignments <= days_in_week - 1)
+        return constraints
 
-    def add_soft_constraints(self):
-        """Add all soft constraints to the model"""
-        self._add_hour_goal_constraints()
-        self._add_alternating_hospital_constraints()
-        self._add_time_off_constraints()
-        self._add_circadian_rhythm_constraints()
+    def _hour_goal_constraints(self) -> List[cp_model.Constraint]:
+        """Try to meet each resident's hour goals (soft constraint)"""
+        constraints = []
 
-    def _add_hour_goal_constraints(self):
-        """Try to meet each resident's hour goals"""
-        # For each resident
         for resident in self.residents:
             if resident.service_type not in [ServiceType.ED, ServiceType.PEDS]:
                 continue
@@ -358,27 +396,30 @@ class ScheduleModel:
             for day in self.days:
                 for shift in self.shifts_by_day[day]:
                     if (day, shift, resident) in self.assignments:
-                        # Get shift duration for this resident's PGY level
                         duration = shift.duration(resident.pgy_level)
-                        # Add to total hours if assigned
                         total_hours += (
                             self.assignments[(day, shift, resident)] * duration
                         )
 
-            # Create a variable for the deviation from the goal
+            # Create deviation variable
             deviation = self.model.NewIntVar(0, 1000, f"deviation_{resident.name}")
 
             # |total_hours - hours_goal| = deviation
-            self.model.AddAbsEquality(deviation, total_hours - resident.hours_goal)
+            constraints.append(
+                self.model.AddAbsEquality(deviation, total_hours - resident.hours_goal)
+            )
 
-            # Add to objective: minimize deviation
+            # Add to objective terms
             self.objective_terms.append(deviation)
 
-    def _add_alternating_hospital_constraints(self):
+        return constraints
+
+    def _alternating_hospital_constraints(self) -> List[cp_model.Constraint]:
         """Prefer alternating between hospitals when working consecutive days"""
-        # For each resident and each day (except the first)
+        constraints = []
+
         for day_idx, day in enumerate(self.days):
-            if day_idx == 0:  # Skip first day
+            if day_idx == 0:
                 continue
 
             prev_day = self.days[day_idx - 1]
@@ -387,26 +428,21 @@ class ScheduleModel:
                 if resident.service_type not in [ServiceType.ED, ServiceType.PEDS]:
                     continue
 
-                # For each hospital
                 for hospital in self.hospital_system.hospitals:
-                    # Get shifts at this hospital on the current day
+                    # Get shifts at this hospital
                     current_hospital_shifts = [
                         s
                         for s in self.shifts_by_day[day]
                         if s.hospital.name == hospital.name
                     ]
-
-                    # Get shifts at this hospital on the previous day
                     prev_hospital_shifts = [
                         s
                         for s in self.shifts_by_day[prev_day]
                         if s.hospital.name == hospital.name
                     ]
 
-                    # If the resident worked at this hospital on the previous day
-                    # and is working at this hospital on the current day, add a penalty
                     if current_hospital_shifts and prev_hospital_shifts:
-                        # Create a binary variable for this violation
+                        # Create violation variable
                         violation = self.model.NewBoolVar(
                             f"hospital_violation_{day.strftime('%Y-%m-%d')}_{resident.name}_{hospital.name}"
                         )
@@ -422,31 +458,37 @@ class ScheduleModel:
                             if (day, shift, resident) in self.assignments
                         )
 
-                        # If hospital_assignments >= 2, then violation = 1
-                        self.model.Add(hospital_assignments >= 2).OnlyEnforceIf(
-                            violation
+                        # If working at same hospital both days, violation = 1
+                        constraints.append(
+                            self.model.Add(hospital_assignments >= 2).OnlyEnforceIf(
+                                violation
+                            )
                         )
-                        self.model.Add(hospital_assignments < 2).OnlyEnforceIf(
-                            violation.Not()
+                        constraints.append(
+                            self.model.Add(hospital_assignments < 2).OnlyEnforceIf(
+                                violation.Not()
+                            )
                         )
 
-                        # Add to objective: minimize violations
+                        # Add to objective terms
                         self.objective_terms.append(violation)
 
-    def _add_time_off_constraints(self):
-        """Try to accommodate time-off requests"""
-        # For each resident
+        return constraints
+
+    def _time_off_constraints(self) -> List[cp_model.Constraint]:
+        """Try to accommodate time-off requests (soft constraint)"""
+        constraints = []
+
         for resident in self.residents:
             if not resident.requests_off:
                 continue
 
-            # For each requested day off
             for request_date in resident.requests_off:
                 # Find the closest day in our schedule
                 closest_day = min(self.days, key=lambda d: abs((d - request_date).days))
 
-                # If the closest day is in our schedule
-                if abs((closest_day - request_date).days) <= 7:  # Within a week
+                # If the closest day is within a week
+                if abs((closest_day - request_date).days) <= 7:
                     # Sum of assignments for this resident on this day
                     day_assignments = sum(
                         self.assignments[(closest_day, shift, resident)]
@@ -454,23 +496,32 @@ class ScheduleModel:
                         if (closest_day, shift, resident) in self.assignments
                     )
 
-                    # Create a binary variable for this violation
+                    # Create violation variable
                     violation = self.model.NewBoolVar(
                         f"request_violation_{closest_day.strftime('%Y-%m-%d')}_{resident.name}"
                     )
 
-                    # If day_assignments > 0, then violation = 1
-                    self.model.Add(day_assignments > 0).OnlyEnforceIf(violation)
-                    self.model.Add(day_assignments == 0).OnlyEnforceIf(violation.Not())
+                    # If working on requested day off, violation = 1
+                    constraints.append(
+                        self.model.Add(day_assignments > 0).OnlyEnforceIf(violation)
+                    )
+                    constraints.append(
+                        self.model.Add(day_assignments == 0).OnlyEnforceIf(
+                            violation.Not()
+                        )
+                    )
 
-                    # Add to objective: minimize violations
+                    # Add to objective terms
                     self.objective_terms.append(violation)
 
-    def _add_circadian_rhythm_constraints(self):
-        """Try to minimize circadian rhythm disruption"""
-        # For each resident and each day (except the first two)
+        return constraints
+
+    def _circadian_rhythm_constraints(self) -> List[cp_model.Constraint]:
+        """Try to minimize circadian rhythm disruption (soft constraint)"""
+        constraints = []
+
         for day_idx, day in enumerate(self.days):
-            if day_idx < 2:  # Skip first two days
+            if day_idx < 2:
                 continue
 
             prev_day = self.days[day_idx - 1]
@@ -480,23 +531,19 @@ class ScheduleModel:
                 if resident.service_type not in [ServiceType.ED, ServiceType.PEDS]:
                     continue
 
-                # For each shift on the current day
+                # Check for disruptive patterns (e.g., 7AM -> 4PM -> 7AM)
                 for shift in self.shifts_by_day[day]:
                     if (day, shift, resident) not in self.assignments:
                         continue
 
-                    # Get shift start hour
                     start_hour = shift.start_time.hour
 
-                    # For each shift on the previous day
                     for prev_shift in self.shifts_by_day[prev_day]:
                         if (prev_day, prev_shift, resident) not in self.assignments:
                             continue
 
-                        # Get previous shift start hour
                         prev_start_hour = prev_shift.start_time.hour
 
-                        # For each shift on the day before the previous day
                         for prev_prev_shift in self.shifts_by_day[prev_prev_day]:
                             if (
                                 prev_prev_day,
@@ -505,53 +552,84 @@ class ScheduleModel:
                             ) not in self.assignments:
                                 continue
 
-                            # Get shift start hour
                             prev_prev_start_hour = prev_prev_shift.start_time.hour
 
-                            # Check for disruptive patterns
-                            # 1. 7AM -> 4PM -> 7AM (flip-flopping)
+                            # Check for flip-flopping pattern
                             if (
                                 prev_prev_start_hour == 7
                                 and prev_start_hour >= 16
                                 and start_hour == 7
                             ):
-                                # Create a binary variable for this violation
+                                # Create violation variable
                                 violation = self.model.NewBoolVar(
                                     f"rhythm_violation_{day.strftime('%Y-%m-%d')}_{resident.name}_flipflop"
                                 )
 
-                                # If all three shifts are assigned, then violation = 1
-                                self.model.Add(
-                                    self.assignments[
-                                        (prev_prev_day, prev_prev_shift, resident)
-                                    ]
-                                    + self.assignments[(prev_day, prev_shift, resident)]
-                                    + self.assignments[(day, shift, resident)]
-                                    >= 3
-                                ).OnlyEnforceIf(violation)
+                                # If all three shifts are assigned, violation = 1
+                                constraints.append(
+                                    self.model.Add(
+                                        self.assignments[
+                                            (prev_prev_day, prev_prev_shift, resident)
+                                        ]
+                                        + self.assignments[
+                                            (prev_day, prev_shift, resident)
+                                        ]
+                                        + self.assignments[(day, shift, resident)]
+                                        >= 3
+                                    ).OnlyEnforceIf(violation)
+                                )
+                                constraints.append(
+                                    self.model.Add(
+                                        self.assignments[
+                                            (prev_prev_day, prev_prev_shift, resident)
+                                        ]
+                                        + self.assignments[
+                                            (prev_day, prev_shift, resident)
+                                        ]
+                                        + self.assignments[(day, shift, resident)]
+                                        < 3
+                                    ).OnlyEnforceIf(violation.Not())
+                                )
 
-                                self.model.Add(
-                                    self.assignments[
-                                        (prev_prev_day, prev_prev_shift, resident)
-                                    ]
-                                    + self.assignments[(prev_day, prev_shift, resident)]
-                                    + self.assignments[(day, shift, resident)]
-                                    < 3
-                                ).OnlyEnforceIf(violation.Not())
-
-                                # Add to objective: minimize violations
+                                # Add to objective terms
                                 self.objective_terms.append(violation)
 
-    def solve(self):
+        return constraints
+
+    def apply_constraints(
+        self, constraint_specs: Optional[List[ConstraintSpec]] = None
+    ) -> Dict[str, List[cp_model.Constraint]]:
+        """Apply constraints to the model"""
+        if constraint_specs is None:
+            constraint_specs = self.get_constraint_specs()
+
+        applied_constraints = {}
+        for spec in constraint_specs:
+            if spec.enabled:
+                constraints = spec.constraint_func()
+                applied_constraints[spec.name] = constraints
+
+        return applied_constraints
+
+    def solve(self, enabled_constraints: Optional[List[str]] = None) -> Optional[Dict]:
         """Solve the scheduling problem"""
-        # Set solver parameters for randomization
+        # Get constraint specs and filter if needed
+        constraint_specs = self.get_constraint_specs()
+        if enabled_constraints is not None:
+            constraint_specs = [
+                spec for spec in constraint_specs if spec.name in enabled_constraints
+            ]
+
+        # Apply constraints
+        applied_constraints = self.apply_constraints(constraint_specs)
+
+        # Set objective if we have soft constraints
+        if self.objective_terms:
+            self.model.Minimize(sum(self.objective_terms))
+
+        # Set solver parameters
         self.solver.parameters.random_seed = random.randint(0, 1000000)
-
-        # Set time limit (in seconds)
-        self.solver.parameters.max_time_in_seconds = 300  # 5 minutes
-
-        # Set the objective to minimize the sum of all objective terms
-        self.model.Minimize(sum(self.objective_terms))
+        self.solver.parameters.max_time_in_seconds = 300
 
         # Solve the model
         status = self.solver.Solve(self.model)
@@ -561,17 +639,13 @@ class ScheduleModel:
         else:
             return None
 
-    def _extract_solution(self):
+    def _extract_solution(self) -> Dict:
         """Extract the solution from the solver"""
         schedule = {}
 
-        # For each day
         for day in self.days:
             schedule[day] = {}
-
-            # For each shift on this day
             for shift in self.shifts_by_day[day]:
-                # Find the resident assigned to this shift
                 for resident in self.residents:
                     if (day, shift, resident) in self.assignments:
                         if (
@@ -595,11 +669,7 @@ def create_schedule(residents_data, shifts_data, days, hospital_system):
         residents=residents, shifts=shifts, days=days, hospital_system=hospital_system
     )
 
-    # Add constraints
-    model.add_hard_constraints()
-    model.add_soft_constraints()
-
-    # Solve the model
+    # Solve with all constraints
     schedule = model.solve()
 
     return schedule

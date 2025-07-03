@@ -43,7 +43,7 @@ class ServiceType(Enum):
     PEDS = "Peds"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Hospital:
     name: str
 
@@ -63,7 +63,7 @@ class Team(Enum):
     PEDS = "P"  # Prefer PGY-1, can use PGY-2/3 if needed
 
 
-@dataclass
+@dataclass(frozen=True)
 class Resident:
     """Represents a medical resident with their details and constraints"""
 
@@ -71,5 +71,5 @@ class Resident:
     pgy_level: PGYLevel
     service_type: ServiceType
     hours_goal: int
-    requests_off: list[date] = field(default_factory=list)
+    requests_off: tuple[date, ...] = field(default_factory=tuple)
     current_hours: int = 0

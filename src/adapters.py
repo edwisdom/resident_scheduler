@@ -91,7 +91,7 @@ def read_residents(filename: Path) -> list[Resident]:
             pgy_level=pgy_level,
             service_type=service_type,
             hours_goal=hours_goal,
-            requests_off=requests_off,
+            requests_off=tuple(requests_off),
         )
 
         residents.append(resident)

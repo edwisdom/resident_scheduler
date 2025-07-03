@@ -62,7 +62,7 @@ def convert_old_to_new_code(old_code: str) -> str:
 Hour: TypeAlias = int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Shift:
     """Represents a work shift with its properties"""
 
