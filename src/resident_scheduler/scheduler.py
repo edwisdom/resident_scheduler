@@ -112,8 +112,10 @@ class ScheduleModel:
     def get_constraint_specs(self) -> List[ConstraintSpec]:
         """Get all available constraint specifications"""
         return [
-            ConstraintSpec("shift_assignment", self._shift_assignment_constraints),
-            ConstraintSpec("resident_daily", self._resident_daily_constraints),
+            ConstraintSpec(
+                "one_resident_per_shift", self._one_resident_per_shift_constraints
+            ),
+            ConstraintSpec("one_shift_per_day", self._one_shift_per_day_constraints),
             # ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
             # ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
             # ConstraintSpec("team_assignment", self._team_constraints),
@@ -135,7 +137,7 @@ class ScheduleModel:
             # ),
         ]
 
-    def _shift_assignment_constraints(self) -> List[cp_model.Constraint]:
+    def _one_resident_per_shift_constraints(self) -> List[cp_model.Constraint]:
         """Each mandatory shift must be assigned to exactly one resident"""
         constraints = []
         for day in self.days:
@@ -153,7 +155,7 @@ class ScheduleModel:
                     )
         return constraints
 
-    def _resident_daily_constraints(self) -> List[cp_model.Constraint]:
+    def _one_shift_per_day_constraints(self) -> List[cp_model.Constraint]:
         """Each resident can only work one shift per day"""
         constraints = []
         for day in self.days:
