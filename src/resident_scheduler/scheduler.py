@@ -107,26 +107,26 @@ class ScheduleModel:
         """Get all available constraint specifications"""
         return [
             ConstraintSpec("shift_assignment", self._shift_assignment_constraints),
-            ConstraintSpec("resident_daily", self._resident_daily_constraints),
-            ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
-            ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
-            ConstraintSpec("team_assignment", self._team_constraints),
-            ConstraintSpec("rest_periods", self._rest_period_constraints),
-            ConstraintSpec("day_off", self._day_off_constraints),
-            ConstraintSpec(
-                "hour_goals", self._hour_goal_constraints, ConstraintType.SOFT
-            ),
-            ConstraintSpec(
-                "alternating_hospitals",
-                self._alternating_hospital_constraints,
-                ConstraintType.SOFT,
-            ),
-            ConstraintSpec("time_off", self._time_off_constraints, ConstraintType.SOFT),
-            ConstraintSpec(
-                "circadian_rhythm",
-                self._circadian_rhythm_constraints,
-                ConstraintType.SOFT,
-            ),
+            # ConstraintSpec("resident_daily", self._resident_daily_constraints),
+            # ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
+            # ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
+            # ConstraintSpec("team_assignment", self._team_constraints),
+            # ConstraintSpec("rest_periods", self._rest_period_constraints),
+            # ConstraintSpec("day_off", self._day_off_constraints),
+            # ConstraintSpec(
+            #     "hour_goals", self._hour_goal_constraints, ConstraintType.SOFT
+            # ),
+            # ConstraintSpec(
+            #     "alternating_hospitals",
+            #     self._alternating_hospital_constraints,
+            #     ConstraintType.SOFT,
+            # ),
+            # ConstraintSpec("time_off", self._time_off_constraints, ConstraintType.SOFT),
+            # ConstraintSpec(
+            #     "circadian_rhythm",
+            #     self._circadian_rhythm_constraints,
+            #     ConstraintType.SOFT,
+            # ),
         ]
 
     def _shift_assignment_constraints(self) -> List[cp_model.Constraint]:

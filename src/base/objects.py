@@ -30,6 +30,15 @@ class DayOfWeek(Enum):
         return self.name.upper()
 
     @classmethod
+    def from_str(cls, day_name: str) -> "DayOfWeek":
+        """Convert a string day name to the corresponding DayOfWeek enum"""
+        day_name_upper = day_name.upper()
+        for day in cls:
+            if day.name.upper() == day_name_upper:
+                return day
+        raise ValueError(f"Invalid day name: {day_name}")
+
+    @classmethod
     def values(cls) -> set[str]:
         """Return all enum values as a set of strings"""
         return {day.value for day in cls}

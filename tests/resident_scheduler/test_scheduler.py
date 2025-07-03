@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 
-import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-# Add src to path so we can import modules
-sys.path.append(str(Path(__file__).parent / "src"))
-
 from base.objects import Hospital, HospitalSystem
+from base.shift import generate_shifts_for_date_range
 from formats.readers import read_residents, read_shifts
 from resident_scheduler.scheduler import ScheduleModel
 
@@ -19,10 +16,10 @@ def test_scheduler():
     # Load test data
     test_data_dir = Path("test_data")
     residents = read_residents(test_data_dir / "residents.csv")
-    shifts = read_shifts(test_data_dir / "weekly_shifts.csv")
+    shift_templates = read_shifts(test_data_dir / "weekly_shifts.csv")
 
     print(f"Loaded {len(residents)} residents")
-    print(f"Loaded {len(shifts)} shifts")
+    print(f"Loaded {len(shift_templates)} shift templates")
 
     # Filter to only active residents for this test
     active_residents = [r for r in residents if r.service_type.value in ["ED", "Peds"]]
@@ -33,10 +30,14 @@ def test_scheduler():
         name="Test Hospital System", hospitals=[Hospital(name="L"), Hospital(name="W")]
     )
 
-    # Create a test week (July 1-7, 2024)
-    start_date = date(2024, 7, 1)  # Monday
-    days = [start_date + timedelta(days=i) for i in range(7)]
+    start_date = date(2024, 7, 8)
+    end_date = date(2024, 8, 4)
+    days = [start_date + timedelta(days=i) for i in range(28)]
     print(f"Scheduling for dates: {days[0]} to {days[-1]}")
+
+    # Generate actual shifts from templates for the date range
+    shifts = generate_shifts_for_date_range(shift_templates, start_date, end_date)
+    print(f"Generated {len(shifts)} actual shifts for the date range")
 
     # Create and run the scheduler
     try:
@@ -90,7 +91,11 @@ def test_scheduler():
             for day in days:
                 day_assignments = schedule.get(day, {})
                 for shift in shifts:
-                    if shift.is_mandatory and shift not in day_assignments:
+                    if (
+                        shift.is_mandatory
+                        and shift.date == day
+                        and shift not in day_assignments
+                    ):
                         unassigned_shifts.append((day, shift))
 
             if unassigned_shifts:
