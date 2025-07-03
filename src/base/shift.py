@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Callable, TypeAlias
+from datetime import date, datetime, time, timedelta
+from typing import Callable, List, TypeAlias
 
 from src.base.objects import DayOfWeek, Hospital, PGYLevel, Team
 
@@ -63,13 +63,13 @@ Hour: TypeAlias = int
 
 
 @dataclass(frozen=True)
-class Shift:
-    """Represents a work shift with its properties"""
+class ShiftTemplate:
+    """Represents a weekly recurring shift pattern"""
 
     hospital: Hospital
     team: Team
-    start_time: datetime
-    day: DayOfWeek
+    start_time: time  # Just the time, not full datetime
+    day_of_week: DayOfWeek
     code: str
     is_mandatory: bool = True
 
@@ -101,7 +101,7 @@ class Shift:
             if self.team == Team.EVAL:
                 return 10
 
-            # Default durations based on PGY levelå
+            # Default durations based on PGY level
             if level == PGYLevel.PGY1:
                 return 12  # PGY-1 shifts are 12 hours
             else:
@@ -109,8 +109,22 @@ class Shift:
 
         return get_duration
 
+    def create_shift(self, shift_date: date) -> "Shift":
+        """Create an actual shift instance for the given date"""
+        # Validate that the date's day of week matches this template using the new method
+        actual_day = DayOfWeek.from_date(shift_date)
+        if actual_day != self.day_of_week:
+            raise ValueError(f"Date {shift_date} is not a {self.day_of_week.name}")
+
+        return Shift(
+            template=self,
+            date=shift_date,
+            code=f"{self.code}-{shift_date.strftime('%Y%m%d')}",
+        )
+
     @classmethod
-    def from_code(cls, code: str) -> "Shift":
+    def from_code(cls, code: str) -> "ShiftTemplate":
+        """Create a ShiftTemplate from a code string"""
         components = code.split("-")
         num_expected = 5
 
@@ -121,15 +135,86 @@ class Shift:
 
         mandatory, hospital, team, start_time_str, day_of_week = components
 
-        # Parse start time as datetime (using a default date)
+        # Parse start time as time object
         hour = int(start_time_str)
-        start_time = datetime(2024, 1, 1, hour, 0)  # Default date, only time matters
+        start_time = time(hour, 0)
 
         return cls(
             is_mandatory=(mandatory == "m"),
             hospital=Hospital(name=hospital),
             team=Team(team),
             start_time=start_time,
-            day=DayOfWeek(day_of_week),
+            day_of_week=DayOfWeek(day_of_week),
             code=code,
         )
+
+
+@dataclass(frozen=True)
+class Shift:
+    """Represents an actual shift instance on a specific date"""
+
+    template: ShiftTemplate
+    date: date
+    code: str
+
+    # Delegate properties to template for convenience
+    @property
+    def hospital(self) -> Hospital:
+        return self.template.hospital
+
+    @property
+    def team(self) -> Team:
+        return self.template.team
+
+    @property
+    def start_time(self) -> time:
+        return self.template.start_time
+
+    @property
+    def day_of_week(self) -> DayOfWeek:
+        return self.template.day_of_week
+
+    @property
+    def is_mandatory(self) -> bool:
+        return self.template.is_mandatory
+
+    @property
+    def duration(self) -> Callable[[PGYLevel], Hour]:
+        return self.template.duration
+
+    @property
+    def start_datetime(self) -> datetime:
+        """Get the full datetime for this shift"""
+        return datetime.combine(self.date, self.start_time)
+
+
+def generate_shifts_for_date_range(
+    templates: List[ShiftTemplate], start_date: date, end_date: date
+) -> List[Shift]:
+    """Generate actual shift instances from templates for the given date range"""
+    shifts = []
+    current_date = start_date
+
+    while current_date <= end_date:
+        # Get the day of week for the current date using the new method
+        day_of_week = DayOfWeek.from_date(current_date)
+
+        # Find templates that match this day of week
+        for template in templates:
+            if template.day_of_week == day_of_week:
+                shifts.append(template.create_shift(current_date))
+
+        current_date += timedelta(days=1)
+
+    return shifts
+
+
+# For backwards compatibility, keep the old Shift class as an alias
+# This can be removed once all code is updated
+def from_code(code: str) -> "Shift":
+    """Backwards compatibility function - creates a shift template and converts to shift"""
+    # This is a temporary function for backwards compatibility
+    # In practice, you should use ShiftTemplate.from_code() and then create_shift()
+    template = ShiftTemplate.from_code(code)
+    # For backwards compatibility, create a shift for today
+    return template.create_shift(date.today())

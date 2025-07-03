@@ -4,10 +4,10 @@ from pathlib import Path
 import pandas as pd
 
 from src.base.objects import DayOfWeek, PGYLevel, Resident, ServiceType
-from src.base.shift import Shift, convert_old_to_new_code
+from src.base.shift import ShiftTemplate, convert_old_to_new_code
 
 
-def read_shifts(filename: Path) -> list[Shift]:
+def read_shifts(filename: Path) -> list[ShiftTemplate]:
     df = pd.read_csv(filename)
 
     shifts = []
@@ -39,8 +39,8 @@ def read_shifts(filename: Path) -> list[Shift]:
 
             try:
                 new_code = convert_old_to_new_code(old_code)
-                shift = Shift.from_code(new_code)
-                shifts.append(shift)
+                shift_template = ShiftTemplate.from_code(new_code)
+                shifts.append(shift_template)
 
             except (ValueError, KeyError) as e:
                 # Skip invalid shift codes but log them for debugging

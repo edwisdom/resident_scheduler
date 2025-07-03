@@ -13,13 +13,18 @@ class DayOfWeek(Enum):
     SUNDAY = "U"
 
     @classmethod
-    def from_str(cls, day_str: str) -> "DayOfWeek":
-        """Convert a full day name (like 'Monday') to the enum member"""
-        day_name = day_str.upper()
-        for day in cls:
-            if day.name == day_name:
-                return day
-        raise ValueError(f"No DayOfWeek found for '{day_str}'")
+    def from_date(cls, date_obj: date) -> "DayOfWeek":
+        """Convert a date object to the corresponding DayOfWeek enum"""
+        day_mapping = {
+            0: cls.MONDAY,  # Monday
+            1: cls.TUESDAY,  # Tuesday
+            2: cls.WEDNESDAY,  # Wednesday
+            3: cls.THURSDAY,  # Thursday
+            4: cls.FRIDAY,  # Friday
+            5: cls.SATURDAY,  # Saturday
+            6: cls.SUNDAY,  # Sunday
+        }
+        return day_mapping[date_obj.weekday()]
 
     def to_full_str(self) -> str:
         return self.name.upper()

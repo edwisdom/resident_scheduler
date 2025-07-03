@@ -1,13 +1,13 @@
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
 
 from base.objects import Hospital, HospitalSystem, PGYLevel, Resident, ServiceType, Team
-from base.shift import Shift
+from base.shift import Shift, ShiftTemplate, generate_shifts_for_date_range
 
 
 class ConstraintType(Enum):
@@ -30,22 +30,20 @@ class ScheduleModel:
     """Represents the scheduling problem model for the CP-SAT solver"""
 
     residents: List[Resident]
-    shifts: List[Shift]
+    shifts: List[Shift]  # Now these are actual shift instances, not templates
     days: List[date]
     hospital_system: HospitalSystem
 
     # Maps for efficient lookups
     residents_by_pgy: Dict[PGYLevel, List[Resident]] = field(init=False)
-    shifts_by_day: Dict[datetime, List[Shift]] = field(init=False)
+    shifts_by_day: Dict[date, List[Shift]] = field(init=False)
     shifts_by_team: Dict[Team, List[Shift]] = field(init=False)
     shifts_by_hospital: Dict[Hospital, List[Shift]] = field(init=False)
 
     # CP-SAT model components
     model: cp_model.CpModel = field(init=False)
     solver: cp_model.CpSolver = field(init=False)
-    assignments: Dict[Tuple[datetime, Shift, Resident], cp_model.IntVar] = field(
-        init=False
-    )
+    assignments: Dict[Tuple[date, Shift, Resident], cp_model.IntVar] = field(init=False)
     objective_terms: List[cp_model.LinearExpr] = field(init=False)
 
     def __post_init__(self):
@@ -69,12 +67,10 @@ class ScheduleModel:
                 r for r in self.residents if r.pgy_level == pgy
             ]
 
-        # Group shifts by day
+        # Group shifts by day - now much simpler since shifts have actual dates
         self.shifts_by_day = {}
         for day in self.days:
-            self.shifts_by_day[day] = [
-                s for s in self.shifts if s.day.value == day.strftime("%A")[:1].upper()
-            ]
+            self.shifts_by_day[day] = [s for s in self.shifts if s.date == day]
 
         # Group shifts by team
         self.shifts_by_team = {}
@@ -111,26 +107,26 @@ class ScheduleModel:
         """Get all available constraint specifications"""
         return [
             ConstraintSpec("shift_assignment", self._shift_assignment_constraints),
-            # ConstraintSpec("resident_daily", self._resident_daily_constraints),
-            # ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
-            # ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
-            # ConstraintSpec("team_assignment", self._team_constraints),
-            # ConstraintSpec("rest_periods", self._rest_period_constraints),
-            # ConstraintSpec("day_off", self._day_off_constraints),
-            # ConstraintSpec(
-            #     "hour_goals", self._hour_goal_constraints, ConstraintType.SOFT
-            # ),
-            # ConstraintSpec(
-            #     "alternating_hospitals",
-            #     self._alternating_hospital_constraints,
-            #     ConstraintType.SOFT,
-            # ),
-            # ConstraintSpec("time_off", self._time_off_constraints, ConstraintType.SOFT),
-            # ConstraintSpec(
-            #     "circadian_rhythm",
-            #     self._circadian_rhythm_constraints,
-            #     ConstraintType.SOFT,
-            # ),
+            ConstraintSpec("resident_daily", self._resident_daily_constraints),
+            ConstraintSpec("continuous_hours", self._continuous_hours_constraints),
+            ConstraintSpec("weekly_hours", self._weekly_hours_constraints),
+            ConstraintSpec("team_assignment", self._team_constraints),
+            ConstraintSpec("rest_periods", self._rest_period_constraints),
+            ConstraintSpec("day_off", self._day_off_constraints),
+            ConstraintSpec(
+                "hour_goals", self._hour_goal_constraints, ConstraintType.SOFT
+            ),
+            ConstraintSpec(
+                "alternating_hospitals",
+                self._alternating_hospital_constraints,
+                ConstraintType.SOFT,
+            ),
+            ConstraintSpec("time_off", self._time_off_constraints, ConstraintType.SOFT),
+            ConstraintSpec(
+                "circadian_rhythm",
+                self._circadian_rhythm_constraints,
+                ConstraintType.SOFT,
+            ),
         ]
 
     def _shift_assignment_constraints(self) -> List[cp_model.Constraint]:
@@ -176,7 +172,7 @@ class ScheduleModel:
             # Group shifts by start time
             shifts_by_start_time = {}
             for shift in self.shifts_by_day[day]:
-                start_hour = shift.start_time.hour
+                start_hour = shift.start_time.hour  # Now using time object
                 if start_hour not in shifts_by_start_time:
                     shifts_by_start_time[start_hour] = []
                 shifts_by_start_time[start_hour].append(shift)
@@ -484,21 +480,18 @@ class ScheduleModel:
                 continue
 
             for request_date in resident.requests_off:
-                # Find the closest day in our schedule
-                closest_day = min(self.days, key=lambda d: abs((d - request_date).days))
-
-                # If the closest day is within a week
-                if abs((closest_day - request_date).days) <= 7:
+                # Check if the requested date is in our schedule
+                if request_date in self.days:
                     # Sum of assignments for this resident on this day
                     day_assignments = sum(
-                        self.assignments[(closest_day, shift, resident)]
-                        for shift in self.shifts_by_day[closest_day]
-                        if (closest_day, shift, resident) in self.assignments
+                        self.assignments[(request_date, shift, resident)]
+                        for shift in self.shifts_by_day[request_date]
+                        if (request_date, shift, resident) in self.assignments
                     )
 
                     # Create violation variable
                     violation = self.model.NewBoolVar(
-                        f"request_violation_{closest_day.strftime('%Y-%m-%d')}_{resident.name}"
+                        f"request_violation_{request_date.strftime('%Y-%m-%d')}_{resident.name}"
                     )
 
                     # If working on requested day off, violation = 1
@@ -536,7 +529,7 @@ class ScheduleModel:
                     if (day, shift, resident) not in self.assignments:
                         continue
 
-                    start_hour = shift.start_time.hour
+                    start_hour = shift.start_time.hour  # Now using time object
 
                     for prev_shift in self.shifts_by_day[prev_day]:
                         if (prev_day, prev_shift, resident) not in self.assignments:
@@ -658,11 +651,27 @@ class ScheduleModel:
         return schedule
 
 
-def create_schedule(residents_data, shifts_data, days, hospital_system):
+def create_schedule(
+    residents_data,
+    shift_templates_data,
+    start_date: date,
+    end_date: date,
+    hospital_system,
+):
     """Create a schedule using the CP-SAT solver"""
     # Create domain objects
     residents = [Resident(**r) for r in residents_data]
-    shifts = [Shift(**s) for s in shifts_data]
+
+    # Create shift templates and generate actual shifts for the date range
+    shift_templates = [ShiftTemplate(**s) for s in shift_templates_data]
+    shifts = generate_shifts_for_date_range(shift_templates, start_date, end_date)
+
+    # Generate list of days
+    days = []
+    current_date = start_date
+    while current_date <= end_date:
+        days.append(current_date)
+        current_date += timedelta(days=1)
 
     # Create the schedule model
     model = ScheduleModel(
