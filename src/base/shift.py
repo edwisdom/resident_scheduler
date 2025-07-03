@@ -207,14 +207,3 @@ def generate_shifts_for_date_range(
         current_date += timedelta(days=1)
 
     return shifts
-
-
-# For backwards compatibility, keep the old Shift class as an alias
-# This can be removed once all code is updated
-def from_code(code: str) -> "Shift":
-    """Backwards compatibility function - creates a shift template and converts to shift"""
-    # This is a temporary function for backwards compatibility
-    # In practice, you should use ShiftTemplate.from_code() and then create_shift()
-    template = ShiftTemplate.from_code(code)
-    # For backwards compatibility, create a shift for today
-    return template.create_shift(date.today())
